@@ -20,11 +20,12 @@ report.
 """
 
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 from db import run_query
-from style import page_header, seconds_to_hms, shade_gradient, style_fig
+from style import insight_card, page_header, seconds_to_hms, shade_gradient, style_fig
 
 page_header("🏆 Classification Comparison", "General Classification · Points · King of the Mountains · Young Rider")
 
@@ -254,3 +255,140 @@ compare_fig.update_layout(
 )
 compare_fig = style_fig(compare_fig)
 st.plotly_chart(compare_fig, use_container_width=True)
+
+st.divider()
+
+# ----------------------------------------------------------------------
+# Mountain GC proxy: re-rank riders using only their adjusted time on
+# Mountain stages, and show where that diverges from the overall GC.
+# ----------------------------------------------------------------------
+st.subheader("⛰️ Mountain GC Proxy vs Overall GC")
+st.caption(
+    "A proxy General Classification computed from adjusted time on "
+    "Mountain stages only (6 of the 21 stages), compared against the "
+    "real overall GC. Large positive differences mean a rider climbs "
+    "much better, relative to the field, than their overall result "
+    "suggests."
+)
+
+mountain_sql = """
+    select res.bib, sum(res.time - res.bonus + res.penalty) as mountain_time
+    from result res
+    join stage s on s.day = res.day
+    where s.type = 'mountain'
+    group by res.bib
+"""
+mountain_df = run_query(mountain_sql)
+mountain_df["mountain_rank"] = mountain_df["mountain_time"].rank(method="min").astype(int)
+
+mountain_compare = gc_df.merge(mountain_df, on="bib", how="inner")
+mountain_compare["rank_diff"] = mountain_compare["gc_rank"] - mountain_compare["mountain_rank"]
+mountain_compare = mountain_compare.sort_values("rank_diff", ascending=False)
+
+best_climber = mountain_compare.iloc[0]
+insight_card(
+    f"<b>{best_climber['rider_name']}</b> ranks <b>{int(best_climber['gc_rank'])}</b> "
+    f"overall but <b>{int(best_climber['mountain_rank'])}</b> on Mountain stages alone -- "
+    f"the biggest climber-vs-overall divergence in the field."
+)
+
+mcol1, mcol2 = st.columns([1.3, 1], gap="medium")
+
+with mcol1:
+    top_divergence = pd.concat([mountain_compare.head(8), mountain_compare.tail(8)])
+    div_fig = px.bar(
+        top_divergence,
+        x="rank_diff",
+        y="rider_name",
+        orientation="h",
+        color="rank_diff",
+        color_continuous_scale="RdYlGn",
+        labels={"rank_diff": "GC rank minus Mountain rank", "rider_name": "Rider"},
+        title="Biggest divergences: overall GC rank vs Mountain-only rank",
+    )
+    div_fig.update_traces(
+        hovertemplate=(
+            "<b>%{y}</b><br>GC rank: %{customdata[0]}<br>Mountain rank: %{customdata[1]}"
+            "<extra></extra>"
+        ),
+        customdata=top_divergence[["gc_rank", "mountain_rank"]].values,
+    )
+    div_fig.update_layout(height=500, coloraxis_showscale=False)
+    div_fig = style_fig(div_fig)
+    st.plotly_chart(div_fig, use_container_width=True)
+
+with mcol2:
+    st.markdown("**Top 10 -- Mountain stages only**")
+    mountain_top10 = mountain_compare.sort_values("mountain_rank").head(10)[
+        ["mountain_rank", "rider_name", "team", "gc_rank"]
+    ]
+    st.dataframe(
+        mountain_top10.rename(
+            columns={"mountain_rank": "Mtn. rank", "rider_name": "Rider", "team": "Team", "gc_rank": "Overall GC rank"}
+        ),
+        hide_index=True,
+        use_container_width=True,
+        height=400,
+    )
+
+st.divider()
+
+# ----------------------------------------------------------------------
+# Bonuses, penalties, and a counterfactual GC replay: what would the
+# top 10 look like if bonuses (or penalties) didn't exist?
+# ----------------------------------------------------------------------
+st.subheader("🔁 Bonuses, Penalties & Counterfactual GC")
+st.caption(
+    "Cumulative time bonuses and penalties earned across the race, and "
+    "a replay of the GC top 10 with bonuses or penalties toggled off."
+)
+
+bp_sql = """
+    select res.bib, sum(res.bonus) as total_bonus, sum(res.penalty) as total_penalty
+    from result res
+    group by res.bib
+"""
+bp_df = run_query(bp_sql)
+counterfactual = gc_df.merge(bp_df, on="bib", how="left").fillna({"total_bonus": 0, "total_penalty": 0})
+
+toggle = st.radio(
+    "Replay GC top 10 with:",
+    ["Actual (bonuses + penalties applied)", "No bonuses", "No penalties"],
+    horizontal=True,
+)
+if toggle == "No bonuses":
+    # Removing the bonus means that time is added back onto the rider's total.
+    counterfactual["cf_time"] = counterfactual["adjusted_time"] + counterfactual["total_bonus"]
+elif toggle == "No penalties":
+    counterfactual["cf_time"] = counterfactual["adjusted_time"] - counterfactual["total_penalty"]
+else:
+    counterfactual["cf_time"] = counterfactual["adjusted_time"]
+
+counterfactual["cf_rank"] = counterfactual["cf_time"].rank(method="min").astype(int)
+counterfactual["rank_shift"] = counterfactual["gc_rank"] - counterfactual["cf_rank"]
+cf_top10 = counterfactual.sort_values("cf_rank").head(10)[
+    ["cf_rank", "rider_name", "team", "gc_rank", "rank_shift", "total_bonus", "total_penalty"]
+].copy()
+cf_top10["cf_time_display"] = counterfactual.sort_values("cf_rank").head(10)["cf_time"].apply(seconds_to_hms)
+
+def _shift_label(v):
+    if v == 0:
+        return "—"
+    return f"▲{v}" if v > 0 else f"▼{abs(v)}"
+
+cf_top10["Movement"] = cf_top10["rank_shift"].apply(_shift_label)
+
+st.dataframe(
+    cf_top10[["cf_rank", "rider_name", "team", "cf_time_display", "gc_rank", "Movement"]].rename(
+        columns={
+            "cf_rank": "New rank",
+            "rider_name": "Rider",
+            "team": "Team",
+            "cf_time_display": "Time under scenario",
+            "gc_rank": "Actual GC rank",
+        }
+    ),
+    hide_index=True,
+    use_container_width=True,
+    column_config={"New rank": st.column_config.NumberColumn("New rank", width="small")},
+)

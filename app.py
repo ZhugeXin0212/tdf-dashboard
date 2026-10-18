@@ -42,6 +42,7 @@ pages = {
         st.Page("views/stage_drilldown.py", title="Stage Drill-Down", icon="🔍"),
         st.Page("views/classification_comparison.py", title="Classification Comparison", icon="🏆"),
         st.Page("views/aggregate_performance.py", title="Aggregate Performance", icon="📈"),
+        st.Page("views/terrain_pace.py", title="Terrain & Pace", icon="⛰️"),
     ],
     "Geography": [
         st.Page("views/country_participation.py", title="Country Participation", icon="🌍"),

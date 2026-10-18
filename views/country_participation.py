@@ -133,6 +133,62 @@ st.plotly_chart(map_fig, use_container_width=True)
 st.divider()
 
 # ----------------------------------------------------------------------
+# National outcomes: best GC rank + wins/podiums achieved by each
+# nation's riders (within the data we have -- GC only, since Points/
+# KOM are simplified proxies on other pages).
+# ----------------------------------------------------------------------
+st.subheader("🥇 National GC Outcomes")
+st.caption(
+    "For each nation, the best General Classification rank achieved by "
+    "any of its riders, plus how many wins (rank 1) and podiums (rank "
+    "1-3) their riders collected."
+)
+
+national_outcomes_sql = """
+    select
+        c.country_name,
+        min(a.rank) as best_gc_rank,
+        sum(case when a.rank = 1 then 1 else 0 end) as wins,
+        sum(case when a.rank <= 3 then 1 else 0 end) as podiums,
+        count(*) as finishers
+    from award_ind a
+    join rider r on r.bib = a.bib
+    join country c on c.country_code = r.rider_country_code
+    group by c.country_name
+    order by best_gc_rank asc
+"""
+national_outcomes = run_query(national_outcomes_sql)
+
+winner_row = national_outcomes.iloc[0]
+insight_card(
+    f"<b>{winner_row['country_name']}</b> produced the GC winner "
+    f"(best rank <b>{int(winner_row['best_gc_rank'])}</b>), with "
+    f"<b>{int(national_outcomes['podiums'].sum())}</b> total podium finishes "
+    f"across all nations."
+)
+
+st.dataframe(
+    national_outcomes.head(15).rename(
+        columns={
+            "country_name": "Country",
+            "best_gc_rank": "Best GC rank",
+            "wins": "Wins (rank 1)",
+            "podiums": "Podiums (rank 1-3)",
+            "finishers": "Finishers",
+        }
+    ),
+    hide_index=True,
+    use_container_width=True,
+    column_config={
+        "Best GC rank": st.column_config.NumberColumn("Best GC rank", width="small"),
+        "Wins (rank 1)": st.column_config.NumberColumn("Wins (rank 1)", width="small"),
+        "Podiums (rank 1-3)": st.column_config.NumberColumn("Podiums (rank 1-3)", width="small"),
+    },
+)
+
+st.divider()
+
+# ----------------------------------------------------------------------
 # Rider nationality vs team nationality -- drill into a specific country
 # ----------------------------------------------------------------------
 st.subheader("🔎 Explore a country's riders and teams")

@@ -3,10 +3,11 @@ Detail page: full roster of all teams, with their riders and Best Team
 ranking. Reached via the sidebar or by clicking "View all" on Home.
 """
 
+import plotly.express as px
 import streamlit as st
 
 from db import run_query
-from style import page_header, seconds_to_hms
+from style import insight_card, page_header, seconds_to_hms, style_fig
 
 page_header("🏢 All Teams", "Every registered team, its nationality, leader, and Best Team ranking.")
 
@@ -44,6 +45,14 @@ if selected_teams:
 filtered = filtered.copy()
 filtered["Aggregate time"] = filtered["aggregate_time"].apply(seconds_to_hms)
 
+sort_choice = st.radio(
+    "Sort by", ["Roster depth (most riders first)", "Team name (A-Z)"], horizontal=True
+)
+if sort_choice.startswith("Roster"):
+    filtered = filtered.sort_values("roster_size", ascending=False)
+else:
+    filtered = filtered.sort_values("team")
+
 st.caption(f"Showing **{len(filtered)}** of **{len(teams_df)}** teams.")
 
 st.dataframe(
@@ -62,9 +71,54 @@ st.dataframe(
     use_container_width=True,
     height=600,
     column_config={
+        "Riders": st.column_config.ProgressColumn(
+            "Riders", min_value=0, max_value=int(teams_df["roster_size"].max()), format="%d"
+        ),
         "Best Team rank": st.column_config.NumberColumn("Best Team rank", width="small"),
     },
 )
+
+st.divider()
+
+# ----------------------------------------------------------------------
+# Top-10 intensity by team: how many stage top-10 finishes each team
+# racked up across the race, broken down by stage type.
+# ----------------------------------------------------------------------
+st.subheader("🔥 Top-10 Intensity by Team")
+st.caption("Total stage top-10 finishes per team across all 21 stages, broken down by stage type.")
+
+intensity_sql = """
+    select r.team, s.type as stage_type, count(*) as top10_count
+    from result res
+    join stage s on s.day = res.day
+    join rider r on r.bib = res.bib
+    where res.rank <= 10
+    group by r.team, s.type
+"""
+intensity_df = run_query(intensity_sql)
+team_totals = intensity_df.groupby("team")["top10_count"].sum().sort_values(ascending=False)
+top_team = team_totals.index[0]
+insight_card(
+    f"<b>{top_team}</b> leads all teams with <b>{int(team_totals.iloc[0])}</b> "
+    f"total stage top-10 finishes across the race."
+)
+
+top_teams_order = team_totals.head(12).index.tolist()
+intensity_plot_df = intensity_df[intensity_df["team"].isin(top_teams_order)]
+
+intensity_fig = px.bar(
+    intensity_plot_df,
+    x="team",
+    y="top10_count",
+    color="stage_type",
+    category_orders={"team": top_teams_order},
+    labels={"team": "Team", "top10_count": "Top-10 finishes", "stage_type": "Stage type"},
+    title="Stage top-10 finishes by team, broken down by terrain",
+)
+intensity_fig.update_traces(hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y}<extra></extra>")
+intensity_fig.update_layout(xaxis_tickangle=-45, height=480, barmode="stack")
+intensity_fig = style_fig(intensity_fig)
+st.plotly_chart(intensity_fig, use_container_width=True)
 
 st.divider()
 st.subheader("🔎 Team roster")

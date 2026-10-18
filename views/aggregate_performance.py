@@ -35,6 +35,9 @@ with tab_rider:
     )
     picked_bibs = riders.loc[riders["rider_name"].isin(picked), "bib"].tolist()
 
+    stage_types = run_query("select day, type from stage order by day")
+    mountain_days = set(stage_types.loc[stage_types["type"] == "mountain", "day"])
+
     if picked_bibs:
         trend_sql = """
             select g.day, g.bib, r.rider_name, g.cumulative_time, g.gc_rank
@@ -68,9 +71,50 @@ with tab_rider:
             fig.update_traces(
                 hovertemplate="<b>%{fullData.name}</b><br>Date: %{x}<br>Cumulative time: %{y:.0f}s<extra></extra>"
             )
+
+        # Shade Mountain stage days so the terrain context is visible
+        # directly on the timeline, not just implied by the data.
+        for mday in mountain_days:
+            fig.add_vrect(
+                x0=mday, x1=mday,
+                fillcolor="#D32F2F", opacity=0.08, layer="below", line_width=0,
+            )
+
+        # Auto-detect the single biggest GC-rank swing for each selected
+        # rider (the "pivotal stage") and annotate it directly on the
+        # chart -- this is the "contextual descent" insight from E1.
+        pivotal_notes = []
+        for bib, name in zip(picked_bibs, trend_df.loc[trend_df["bib"].isin(picked_bibs), "rider_name"].unique()):
+            rider_trend = trend_df[trend_df["bib"] == bib].sort_values("day").reset_index(drop=True)
+            if len(rider_trend) < 2:
+                continue
+            rider_trend["rank_swing"] = rider_trend["gc_rank"].diff().abs()
+            pivot_idx = rider_trend["rank_swing"].idxmax()
+            if pd.isna(rider_trend.loc[pivot_idx, "rank_swing"]) or rider_trend.loc[pivot_idx, "rank_swing"] == 0:
+                continue
+            pivot_row = rider_trend.loc[pivot_idx]
+            pivotal_notes.append((name, pivot_row["day"], int(rider_trend.loc[pivot_idx, "rank_swing"])))
+            fig.add_annotation(
+                x=pivot_row["day"],
+                y=pivot_row[y_col],
+                text="★",
+                showarrow=True,
+                arrowhead=2,
+                ax=0, ay=-30,
+                font=dict(size=16, color="#B8860B"),
+            )
+
         fig.update_layout(height=550, hovermode="x unified")
         fig = style_fig(fig, hovermode="x unified")
         st.plotly_chart(fig, use_container_width=True)
+        st.caption("🔴 Shaded columns = Mountain stages. ★ = each rider's single biggest GC-rank swing (their pivotal stage).")
+
+        if pivotal_notes:
+            lines = "<br>".join(
+                f"<b>{name}</b>: biggest GC move on <b>{day}</b> ({swing} place{'s' if swing != 1 else ''})"
+                for name, day, swing in pivotal_notes
+            )
+            insight_card(lines)
     else:
         st.info("Select at least one rider above to see their cumulative trend.")
 

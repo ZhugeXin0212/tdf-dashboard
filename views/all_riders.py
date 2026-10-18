@@ -6,10 +6,11 @@ Reached either via the sidebar navigation or by clicking a KPI card /
 so it works as a genuine drill-down target, not just a dump of rows.
 """
 
+import plotly.express as px
 import streamlit as st
 
 from db import run_query
-from style import page_header
+from style import page_header, style_fig
 
 page_header("🚴 All Riders", "Full roster of every registered rider, with search and status filters.")
 
@@ -92,3 +93,65 @@ st.dataframe(
     use_container_width=True,
     height=600,
 )
+
+st.divider()
+
+# ----------------------------------------------------------------------
+# Top-10 regulars: riders who most often finished in a stage's top 10,
+# with a drill-down into exactly which stages contributed.
+# ----------------------------------------------------------------------
+st.subheader("🔥 Top-10 Regulars")
+st.caption("Riders who most often finished in a stage's top 10, across all 21 stages.")
+
+regulars_sql = """
+    select r.bib, r.rider_name, r.team, count(*) as top10_count
+    from result res
+    join rider r on r.bib = res.bib
+    where res.rank <= 10
+    group by r.bib, r.rider_name, r.team
+    order by top10_count desc
+    limit 15
+"""
+regulars_df = run_query(regulars_sql)
+
+rcol1, rcol2 = st.columns([1.2, 1], gap="medium")
+
+with rcol1:
+    reg_fig = px.bar(
+        regulars_df,
+        x="top10_count",
+        y="rider_name",
+        orientation="h",
+        color="top10_count",
+        color_continuous_scale="YlOrBr",
+        labels={"top10_count": "Stage top-10 finishes", "rider_name": "Rider"},
+        title="Most frequent stage top-10 finishers",
+    )
+    reg_fig.update_traces(
+        customdata=regulars_df[["team"]].values,
+        hovertemplate="<b>%{y}</b> (%{customdata[0]})<br>Top-10 finishes: %{x}<extra></extra>",
+    )
+    reg_fig.update_layout(height=480, yaxis=dict(autorange="reversed"), coloraxis_showscale=False)
+    reg_fig = style_fig(reg_fig)
+    st.plotly_chart(reg_fig, use_container_width=True)
+
+with rcol2:
+    st.markdown("**Drill into a rider's contributing stages**")
+    regular_pick = st.selectbox("Rider", regulars_df["rider_name"].tolist(), key="regulars_pick")
+    pick_bib = regulars_df.loc[regulars_df["rider_name"] == regular_pick, "bib"].iloc[0]
+    contributing_sql = """
+        select s.stage_id, s.day, s.type, res.rank
+        from result res
+        join stage s on s.day = res.day
+        where res.bib = %(bib)s and res.rank <= 10
+        order by s.stage_id
+    """
+    contributing_df = run_query(contributing_sql, {"bib": int(pick_bib)})
+    st.dataframe(
+        contributing_df.rename(
+            columns={"stage_id": "Stage", "day": "Date", "type": "Stage type", "rank": "Rank"}
+        ),
+        hide_index=True,
+        use_container_width=True,
+        height=400,
+    )

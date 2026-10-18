@@ -22,11 +22,66 @@ stages["label"] = stages.apply(
 
 teams = run_query("select team from team order by team")
 
+# ----------------------------------------------------------------------
+# Race-at-a-glance: the longest stage (with a one-click jump) and a
+# compact catalogue of the individual time-trial (ITT) stages.
+# ----------------------------------------------------------------------
+longest_stage = stages.loc[stages["length"].idxmax()]
+
+glance_col, itt_col = st.columns([1, 1.4], gap="medium")
+
+with glance_col:
+    with st.container(border=True):
+        st.markdown("**📏 The longest day**")
+        st.caption(
+            f"Stage {int(longest_stage['stage_id'])} -- "
+            f"{longest_stage['start_location']} → {longest_stage['finish_location']} "
+            f"({longest_stage['length']} km, {longest_stage['type']})"
+        )
+        if st.button("Jump to this stage ↓", use_container_width=True):
+            st.session_state["dd_stage_label"] = longest_stage["label"]
+
+with itt_col:
+    with st.container(border=True):
+        st.markdown("**⏱️ Individual time-trial (ITT) stages**")
+        itt_sql = """
+            select
+                s.stage_id, s.day, s.length,
+                r.rider_name as winner, r.team as winner_team
+            from stage s
+            join result res on res.day = s.day and res.rank = 1
+            join rider r on r.bib = res.bib
+            where s.type = 'individual time-trial'
+            order by s.stage_id
+        """
+        itt_df = run_query(itt_sql)
+        st.dataframe(
+            itt_df.rename(
+                columns={
+                    "stage_id": "Stage",
+                    "day": "Date",
+                    "length": "Distance (km)",
+                    "winner": "Winner",
+                    "winner_team": "Team",
+                }
+            ),
+            hide_index=True,
+            use_container_width=True,
+            height=110,
+        )
+
+st.divider()
+
+# ----------------------------------------------------------------------
 # Filters live at the top of the page (same row layout used on the All
 # Riders / All Teams pages) instead of the sidebar.
+# ----------------------------------------------------------------------
+if "dd_stage_label" not in st.session_state:
+    st.session_state["dd_stage_label"] = stages["label"].iloc[0]
+
 f1, f2, f3 = st.columns([2, 1.5, 1])
 with f1:
-    stage_label = st.selectbox("Stage", stages["label"])
+    stage_label = st.selectbox("Stage", stages["label"], key="dd_stage_label")
 with f2:
     team_filter = st.multiselect("Team (optional)", teams["team"].tolist())
 with f3:
@@ -110,10 +165,23 @@ st.dataframe(
 st.divider()
 
 # ----------------------------------------------------------------------
-# Team-level aggregation for this stage
+# Team perspective on this stage: which squads placed riders in the
+# top 10, and how many? (Not just "average time" -- a team can win the
+# day on strength in numbers even without the single fastest rider.)
 # ----------------------------------------------------------------------
-st.subheader("🏢 Team performance on this stage")
-st.caption("Average adjusted time per team among riders who finished this stage.")
+st.subheader("🏢 Which teams made the top 10 today?")
+st.caption("Counts how many riders from each team finished in the top 10 of this stage.")
+
+team_top10_sql = """
+    select r.team, count(*) as riders_in_top10
+    from result res
+    join stage s on s.day = res.day
+    join rider r on r.bib = res.bib
+    where s.stage_id = %(stage_id)s and res.rank <= 10
+    group by r.team
+    order by riders_in_top10 desc
+"""
+team_top10_stage = run_query(team_top10_sql, {"stage_id": stage_id})
 
 team_agg_sql = """
     select
@@ -129,24 +197,42 @@ team_agg_sql = """
 """
 team_agg = run_query(team_agg_sql, {"stage_id": stage_id})
 
-fig = px.bar(
-    team_agg,
-    x="team",
-    y="avg_adjusted_time",
-    labels={"team": "Team", "avg_adjusted_time": "Avg. adjusted time (s)"},
-    title="Average adjusted time by team (lower is better)",
-    color="avg_adjusted_time",
-    color_continuous_scale="YlOrRd",
-)
-fig.update_traces(
-    customdata=team_agg[["riders_finished"]].values,
-    hovertemplate=(
-        "<b>%{x}</b><br>"
-        "Avg. adjusted time: %{y:.0f}s<br>"
-        "Riders finished: %{customdata[0]}"
-        "<extra></extra>"
-    ),
-)
-fig.update_layout(xaxis_tickangle=-45, height=500, showlegend=False, coloraxis_showscale=False)
-fig = style_fig(fig)
-st.plotly_chart(fig, use_container_width=True)
+tcol1, tcol2 = st.columns(2, gap="medium")
+
+with tcol1:
+    fig_top10 = px.bar(
+        team_top10_stage,
+        x="team",
+        y="riders_in_top10",
+        labels={"team": "Team", "riders_in_top10": "Riders in top 10"},
+        title="Riders placed in the stage top 10, by team",
+        color="riders_in_top10",
+        color_continuous_scale="YlOrBr",
+    )
+    fig_top10.update_traces(hovertemplate="<b>%{x}</b><br>Riders in top 10: %{y}<extra></extra>")
+    fig_top10.update_layout(xaxis_tickangle=-45, height=450, showlegend=False, coloraxis_showscale=False)
+    fig_top10 = style_fig(fig_top10)
+    st.plotly_chart(fig_top10, use_container_width=True)
+
+with tcol2:
+    fig = px.bar(
+        team_agg,
+        x="team",
+        y="avg_adjusted_time",
+        labels={"team": "Team", "avg_adjusted_time": "Avg. adjusted time (s)"},
+        title="Average adjusted time by team (lower is better)",
+        color="avg_adjusted_time",
+        color_continuous_scale="YlOrRd",
+    )
+    fig.update_traces(
+        customdata=team_agg[["riders_finished"]].values,
+        hovertemplate=(
+            "<b>%{x}</b><br>"
+            "Avg. adjusted time: %{y:.0f}s<br>"
+            "Riders finished: %{customdata[0]}"
+            "<extra></extra>"
+        ),
+    )
+    fig.update_layout(xaxis_tickangle=-45, height=450, showlegend=False, coloraxis_showscale=False)
+    fig = style_fig(fig)
+    st.plotly_chart(fig, use_container_width=True)
