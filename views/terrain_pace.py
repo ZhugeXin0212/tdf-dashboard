@@ -160,20 +160,28 @@ else:
     color_col, label_col = "team", "Team"
 
 if len(pace_plot_df):
-    pace_fig = px.line(
+    # Stage type is a category, not a continuous axis -- flat/hilly/
+    # mountain/ITT have no meaningful "distance" between them (ITT in
+    # particular isn't a point further along a flat->mountain
+    # gradient, it's a different race format). A line chart implies a
+    # continuous progression and visually "doubles back" whenever a
+    # rider's ITT pace sits between their flat and mountain pace.
+    # Grouped bars compare each stage type independently with no such
+    # implied ordering, so there's no fold-back artifact.
+    pace_fig = px.bar(
         pace_plot_df,
         x="stage_type",
         y="pace_kmh",
         color=color_col,
-        markers=True,
+        barmode="group",
         category_orders={"stage_type": STAGE_TYPE_ORDER},
         labels={"stage_type": "Stage type", "pace_kmh": "Avg. pace (km/h)", color_col: label_col},
         title="Average pace by stage type",
     )
     pace_fig.update_traces(
-        hovertemplate=f"<b>%{{fullData.name}}</b><br>%{{x}}: %{{y:.1f}} km/h<extra></extra>"
+        hovertemplate="<b>%{fullData.name}</b><br>%{x}: %{y:.1f} km/h<extra></extra>"
     )
-    pace_fig.update_layout(height=480)
+    pace_fig.update_layout(height=480, bargap=0.25, bargroupgap=0.08)
     pace_fig = style_fig(pace_fig)
     st.plotly_chart(pace_fig, use_container_width=True)
 else:
