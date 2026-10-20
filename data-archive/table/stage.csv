@@ -1,0 +1,22 @@
+﻿stage_id,day,type,length,start_location,finish_location
+1,2023-07-05,flat,184.9,Lille Métropole,Lille Métropole
+2,2023-07-06,hilly,209.1,Lauwin-Planque,Boulogne-Sur-Mer
+3,2023-07-07,flat,178.3,Valenciennes,Dunkerque
+4,2023-07-08,hilly,174.2,Amiens Métropole,Rouen
+5,2023-07-09,individual time-trial,33,Caen,Caen
+6,2023-07-10,hilly,201.5,Bayeux,Vire Normandie
+7,2023-07-11,hilly,197,Saint-Malo,Mûr-De-Bretagne Guerlédan
+8,2023-07-12,flat,171.4,Saint-Méen-Le-Grand,Laval Espace Mayenne
+9,2023-07-13,flat,174.1,Chinon,Châteauroux
+10,2023-07-14,mountain,165.3,Ennezat,Le Mont-Dore Puy De Sancy
+11,2023-07-16,flat,156.8,Toulouse,Toulouse
+12,2023-07-17,mountain,180.6,Auch,Hautacam
+13,2023-07-18,individual time-trial,10.9,Loudenvielle,Peyragudes
+14,2023-07-19,mountain,182.6,Pau,Luchon-Superbagnères
+15,2023-07-20,hilly,169.3,Muret,Carcassonne
+16,2023-07-22,mountain,171.5,Montpellier,Mont Ventoux
+17,2023-07-23,flat,160.4,Bollène,Valence
+18,2023-07-24,mountain,171.5,Vif,Courchevel Col De La Loze
+19,2023-07-25,mountain,93.1,Albertville,La Plagne
+20,2023-07-26,hilly,184.2,Nantua,Pontarlier
+21,2023-07-27,flat,132.3,Mantes-La-Ville,Paris Champs-Élysées
