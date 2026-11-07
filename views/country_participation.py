@@ -1,225 +1,183 @@
 """
-Task 3d -- Country Participation Analysis: number of teams per country,
-number of riders per country.
+3 · Stakeholder Views -- Nations.
+
+Task 3d (number of teams and riders per country) plus suggested prompts
+E8 (participation by nation, opening the roll-up to riders and teams of
+a chosen country) and E9 (national outcomes: best GC rank, stage
+wins/podiums, with a pathway back to stages and athletes). Adds the
+analysis a federation or sponsor needs: does participation convert into
+results?
 """
 
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
-from db import run_query
-from style import insight_card, page_header, style_fig
-
-page_header(
-    "🌍 Country Participation Analysis",
-    "Investigates how many teams and riders each country contributes, and highlights cross-national rosters.",
+import analytics as A
+from style import (
+    business_question,
+    finding_card,
+    fmt_gap,
+    insight_card,
+    page_header,
+    section,
+    so_what,
+    style_fig,
 )
 
-# ----------------------------------------------------------------------
-# Teams per country
-# ----------------------------------------------------------------------
-teams_per_country_sql = """
-    select c.country_name, c.country_code, count(*) as team_count
-    from team t
-    join country c on c.country_code = t.team_country_code
-    group by c.country_name, c.country_code
-    order by team_count desc
-"""
-teams_per_country = run_query(teams_per_country_sql)
+page_header("🌍 Nations", "Who supplies the peloton — and which nations turn participation into results.")
+business_question(
+    "Which nations are most present in the race, and which convert their riders into results most efficiently?",
+    "Use: national federations (talent investment), sponsors & broadcasters (market relevance), organisers (wildcards).",
+)
 
-riders_per_country_sql = """
-    select c.country_name, c.country_code, count(*) as rider_count
-    from rider r
-    join country c on c.country_code = r.rider_country_code
-    group by c.country_name, c.country_code
-    order by rider_count desc
-"""
-riders_per_country = run_query(riders_per_country_sql)
+nat = A.nation_scorecard()
+riders = A.riders()
+res = A.results()
+teams = A.teams()
 
-top_team_country = teams_per_country.iloc[0]
-top_rider_country = riders_per_country.iloc[0]
+host = nat.iloc[0]
+total_riders = int(nat["riders"].sum())
+total_top10 = int(nat["stage_top10"].sum())
+eff = nat[nat["riders"] >= 3].sort_values("top10_per_rider", ascending=False).iloc[0]
+cross = riders.dropna(subset=["rider_country_code"])
+cross_share = (cross["rider_country_code"] != cross["team_country_code"]).mean()
+team_nations = teams["team_country_code"].nunique()
+
+# ----------------------------------------------------------------------
+# 1. Participation (Task 3d, E8)
+# ----------------------------------------------------------------------
+section("1", "Participation — teams and riders per country", "Task 3d · E8")
+k = st.columns(4)
+with k[0]:
+    finding_card("Rider nationalities", f"{len(nat)}", f"vs only {team_nations} team-registration countries", "#1565C0")
+with k[1]:
+    finding_card("Largest nation", f"{host['rider_country']}", f"{int(host['riders'])} riders "
+                 f"({host['riders'] / total_riders:.0%} of the peloton) · {int(host['teams'])} teams", "#E6A817")
+with k[2]:
+    finding_card("Riding for a foreign team", f"{cross_share:.0%}", "of riders — talent markets are international", "#6A1B9A")
+with k[3]:
+    top5_share = nat.head(5)["riders"].sum() / total_riders
+    finding_card("Top-5 nations' share", f"{top5_share:.0%}", "of all riders — participation is concentrated in Europe", "#00897B")
+
+c1, c2 = st.columns([1.3, 1], gap="medium")
+with c1:
+    show = nat.head(15).copy()
+    fig = go.Figure()
+    fig.add_bar(x=show["rider_country_code"], y=show["riders"], name="Riders", marker_color="#1565C0",
+                customdata=show[["rider_country"]].values,
+                hovertemplate="<b>%{customdata[0]}</b><br>Riders: %{y}<extra></extra>")
+    fig.add_bar(x=show["rider_country_code"], y=show["teams"], name="Teams registered", marker_color="#E6A817",
+                customdata=show[["rider_country"]].values,
+                hovertemplate="<b>%{customdata[0]}</b><br>Teams: %{y}<extra></extra>")
+    fig.update_layout(title="Riders by nationality vs teams registered (top 15 nations)", barmode="group",
+                      height=430, legend=dict(orientation="h", y=1.1), xaxis_title="Nation (ISO code)")
+    st.plotly_chart(style_fig(fig), use_container_width=True)
+with c2:
+    tab_tree, tab_map = st.tabs(["Volume × conversion", "World map"])
+    with tab_tree:
+        tree = px.treemap(nat, path=[px.Constant("All riders"), "rider_country"], values="riders",
+                          color="top10_per_rider", color_continuous_scale="RdYlGn",
+                          color_continuous_midpoint=float(nat["stage_top10"].sum() / nat["riders"].sum()),
+                          custom_data=["stage_top10", "top10_per_rider"])
+        tree.update_traces(hovertemplate="<b>%{label}</b><br>Riders: %{value}<br>Stage top-10s: %{customdata[0]}"
+                           "<br>Per rider: %{customdata[1]:.2f}<extra></extra>")
+        tree.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), coloraxis_colorbar=dict(title="Top-10s / rider"))
+        st.plotly_chart(tree, use_container_width=True)
+        st.caption("Box size = riders; colour = stage top-10s per rider (green = converts above average).")
+    with tab_map:
+        map_fig = px.choropleth(nat, locations="rider_country_code", color="riders", hover_name="rider_country",
+                                color_continuous_scale="YlOrRd", labels={"riders": "Riders"}, projection="natural earth")
+        map_fig.update_traces(hovertemplate="<b>%{hovertext}</b><br>Riders: %{z}<extra></extra>",
+                              marker_line_width=0.4, marker_line_color="#FFFFFF")
+        map_fig.update_geos(showland=True, landcolor="#EDEAE2", showocean=True, oceancolor="#EAF4FB",
+                            showcountries=True, countrycolor="#FFFFFF", showframe=False, showcoastlines=False)
+        map_fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0), coloraxis_showscale=False)
+        st.plotly_chart(map_fig, use_container_width=True)
+
+# ----------------------------------------------------------------------
+# 2. Conversion: participation -> results (analysis + E9)
+# ----------------------------------------------------------------------
+section("2", "Conversion — does participation turn into results?", "E9 · analysis")
+avg_rate = total_top10 / total_riders
+nat_plot = nat.assign(label=nat.apply(
+    lambda r: r["rider_country_code"] if (r["riders"] >= 5 or r["stage_top10"] >= 10) else "", axis=1))
+fig_c = px.scatter(
+    nat_plot, x="riders", y="stage_top10", size="stage_podiums", size_max=30, text="label",
+    color="top10_per_rider", color_continuous_scale="RdYlGn", hover_name="rider_country",
+    custom_data=["best_gc", "stage_wins", "stage_podiums", "top10_per_rider"],
+    labels={"riders": "Riders in the race", "stage_top10": "Stage top-10 finishes", "top10_per_rider": "Top-10s per rider"},
+    title="Riders vs stage top-10s (bubble = stage podiums; above the dashed line = converts better than average)",
+)
+fig_c.add_trace(go.Scatter(x=[0, nat["riders"].max()], y=[0, nat["riders"].max() * avg_rate], mode="lines",
+                           line=dict(dash="dash", color="#888"), name=f"Average: {avg_rate:.2f} top-10s / rider",
+                           hoverinfo="skip"))
+fig_c.update_traces(selector=dict(mode="markers+text"), textposition="top center",
+                    hovertemplate="<b>%{hovertext}</b><br>Riders %{x} · top-10s %{y}<br>Best GC #%{customdata[0]} · "
+                    "stage wins %{customdata[1]} · podiums %{customdata[2]}<br>%{customdata[3]:.2f} top-10s per rider<extra></extra>")
+fig_c.update_layout(height=480, coloraxis_showscale=False, legend=dict(orientation="h", y=-0.15))
+st.plotly_chart(style_fig(fig_c), use_container_width=True)
+
+host_top10_share = host["stage_top10"] / total_top10
 insight_card(
-    f"<b>{top_team_country['country_name']}</b> fields the most teams "
-    f"(<b>{int(top_team_country['team_count'])}</b>), while <b>{top_rider_country['country_name']}</b> "
-    f"supplies the most riders overall (<b>{int(top_rider_country['rider_count'])}</b>)."
+    f"<b>{host['rider_country']}</b> supplies {host['riders'] / total_riders:.0%} of riders but only "
+    f"{host_top10_share:.0%} of stage top-10s, with a best GC of #{int(host['best_gc'])} — presence without conversion. "
+    f"<b>{eff['rider_country']}</b> turned {int(eff['riders'])} riders into {int(eff['stage_top10'])} top-10s "
+    f"({eff['top10_per_rider']:.1f} per rider, {eff['top10_per_rider'] / avg_rate:.1f}× the average) "
+    f"and {int(eff['stage_wins'])} stage win(s)."
 )
 
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("🏢 Teams registered per country")
-    fig1 = px.bar(
-        teams_per_country,
-        x="country_name",
-        y="team_count",
-        labels={"country_name": "Country", "team_count": "Number of teams"},
-        color="team_count",
-        color_continuous_scale="YlOrBr",
-    )
-    fig1.update_traces(hovertemplate="<b>%{x}</b><br>Teams: %{y}<extra></extra>")
-    fig1.update_layout(xaxis_tickangle=-45, height=500, showlegend=False, coloraxis_showscale=False)
-    fig1 = style_fig(fig1)
-    st.plotly_chart(fig1, use_container_width=True)
-
-with col2:
-    st.subheader("🚴 Riders by nationality")
-    fig2 = px.bar(
-        riders_per_country.head(15),
-        x="country_name",
-        y="rider_count",
-        labels={"country_name": "Country", "rider_count": "Number of riders"},
-        color="rider_count",
-        color_continuous_scale="Greens",
-    )
-    fig2.update_traces(hovertemplate="<b>%{x}</b><br>Riders: %{y}<extra></extra>")
-    fig2.update_layout(xaxis_tickangle=-45, height=500, showlegend=False, coloraxis_showscale=False)
-    fig2 = style_fig(fig2)
-    st.plotly_chart(fig2, use_container_width=True)
-
-st.divider()
+tbl = nat.copy()
+tbl["Best GC"] = tbl["best_gc"].map(lambda v: f"#{int(v)}" if v == v else "—")
+st.dataframe(
+    tbl[["rider_country", "teams", "riders", "finishers", "Best GC", "gc_top10", "stage_wins", "stage_podiums",
+         "stage_top10", "top10_per_rider"]].rename(columns={
+        "rider_country": "Nation", "teams": "Teams", "riders": "Riders", "finishers": "Finishers",
+        "gc_top10": "GC top-10 riders", "stage_wins": "Stage wins", "stage_podiums": "Stage podiums",
+        "stage_top10": "Stage top-10s"}),
+    hide_index=True, use_container_width=True, height=380,
+    column_config={"top10_per_rider": st.column_config.ProgressColumn(
+        "Top-10s per rider", min_value=0.0, max_value=float(nat["top10_per_rider"].max()), format="%.2f")},
+)
 
 # ----------------------------------------------------------------------
-# World-map style choropleth of rider nationalities
+# 3. Drill into a nation (E8 / E9 pathway back to athletes and stages)
 # ----------------------------------------------------------------------
-st.subheader("🗺️ Rider nationality world map")
-st.caption(
-    "Flat (equirectangular) projection, hover a country to lift it "
-    "visually above its neighbors."
-)
-map_fig = px.choropleth(
-    riders_per_country,
-    locations="country_code",
-    color="rider_count",
-    hover_name="country_name",
-    color_continuous_scale="YlOrRd",
-    labels={"rider_count": "Riders"},
-    projection="equirectangular",  # flat, horizontal world map
-)
-map_fig.update_traces(
-    hovertemplate="<b>%{hovertext}</b><br>Riders: %{z}<extra></extra>",
-    marker_line_width=0.4,
-    marker_line_color="#FFFFFF",
-)
-# Soft basemap (muted tan land / pale blue ocean, thin white borders)
-# instead of Plotly's default thick black coastlines -- that heavy
-# black outline was the "ugly" look being flagged. Plotly choropleth
-# has no native "lift this shape on hover" effect in pure
-# Python/Streamlit (true elevation needs a JS-driven frontend like
-# Dash); the bold dark hover label with a brand-colored border is the
-# closest honest substitute for a hover "pop".
-map_fig.update_geos(
-    showland=True, landcolor="#EDEAE2",
-    showocean=True, oceancolor="#EAF4FB",
-    showcoastlines=True, coastlinecolor="#D9D4C7", coastlinewidth=0.5,
-    showcountries=True, countrycolor="#FFFFFF", countrywidth=0.5,
-    showlakes=True, lakecolor="#EAF4FB",
-    showframe=False,
-    bgcolor="rgba(0,0,0,0)",
-)
-map_fig.update_layout(
-    height=500,
-    margin=dict(l=0, r=0, t=20, b=0),
-    plot_bgcolor="#FFFFFF",
-    paper_bgcolor="#FFFFFF",
-    font=dict(color="#1A1A1A"),
-    hoverlabel=dict(
-        bgcolor="#1A1A1A",
-        font=dict(color="#FFFFFF", size=14, family="sans-serif"),
-        bordercolor="#FFC72C",
-        namelength=-1,
-    ),
-)
-st.plotly_chart(map_fig, use_container_width=True)
+section("3", "Open a nation — its riders, teams and best days", "E8 · E9")
+country = st.selectbox("Nation", nat["rider_country"].tolist(), index=0)
+code = nat.loc[nat["rider_country"] == country, "rider_country_code"].iloc[0]
+cr = riders[riders["rider_country_code"] == code].copy()
+cr["Foreign team?"] = cr["team_country_code"] != code
+cr["GC"] = cr.apply(lambda r: f"#{int(r['gc_rank'])}" if r["gc_rank"] == r["gc_rank"] else f"Exit S{int(r['exit_stage'])}", axis=1)
 
-st.divider()
+d1, d2 = st.columns([1.2, 1], gap="medium")
+with d1:
+    st.markdown(f"**{len(cr)} {country} rider(s) across {cr['team'].nunique()} team(s)**")
+    st.dataframe(cr.sort_values("gc_rank")[["rider_name", "team", "team_country", "Foreign team?", "age_at_start", "GC"]]
+                 .rename(columns={"rider_name": "Rider", "team": "Team", "team_country": "Team country", "age_at_start": "Age"}),
+                 hide_index=True, use_container_width=True, height=330)
+with d2:
+    best_days = res[(res["rider_country_code"] == code) & (res["rank"] <= 3)].sort_values(["rank", "stage_id"])
+    st.markdown(f"**Stage podiums ({len(best_days)})**")
+    if len(best_days):
+        st.dataframe(best_days[["stage_id", "type_label", "rider_name", "rank", "gap_to_winner"]]
+                     .assign(gap_to_winner=lambda d: d["gap_to_winner"].map(fmt_gap))
+                     .rename(columns={"stage_id": "Stage", "type_label": "Type", "rider_name": "Rider", "rank": "Rank",
+                                      "gap_to_winner": "Gap"}), hide_index=True, use_container_width=True, height=330)
+    else:
+        st.info("No stage podiums for this nation.")
 
-# ----------------------------------------------------------------------
-# National outcomes: best GC rank + wins/podiums achieved by each
-# nation's riders (within the data we have -- GC only, since Points/
-# KOM are simplified proxies on other pages).
-# ----------------------------------------------------------------------
-st.subheader("🥇 National GC Outcomes")
-st.caption(
-    "For each nation, the best General Classification rank achieved by "
-    "any of its riders, plus how many wins (rank 1) and podiums (rank "
-    "1-3) their riders collected."
-)
-
-national_outcomes_sql = """
-    select
-        c.country_name,
-        min(a.rank) as best_gc_rank,
-        sum(case when a.rank = 1 then 1 else 0 end) as wins,
-        sum(case when a.rank <= 3 then 1 else 0 end) as podiums,
-        count(*) as finishers
-    from award_ind a
-    join rider r on r.bib = a.bib
-    join country c on c.country_code = r.rider_country_code
-    group by c.country_name
-    order by best_gc_rank asc
-"""
-national_outcomes = run_query(national_outcomes_sql)
-
-winner_row = national_outcomes.iloc[0]
+home_teams = cr[~cr["Foreign team?"]]["team"].nunique()
 insight_card(
-    f"<b>{winner_row['country_name']}</b> produced the GC winner "
-    f"(best rank <b>{int(winner_row['best_gc_rank'])}</b>), with "
-    f"<b>{int(national_outcomes['podiums'].sum())}</b> total podium finishes "
-    f"across all nations."
+    f"{(cr['Foreign team?']).mean():.0%} of {country}'s riders race for a team registered in another country"
+    + (f"; {home_teams} home-registered team(s) employ the rest." if home_teams else ".")
 )
 
-st.dataframe(
-    national_outcomes.head(15).rename(
-        columns={
-            "country_name": "Country",
-            "best_gc_rank": "Best GC rank",
-            "wins": "Wins (rank 1)",
-            "podiums": "Podiums (rank 1-3)",
-            "finishers": "Finishers",
-        }
-    ),
-    hide_index=True,
-    use_container_width=True,
-    column_config={
-        "Best GC rank": st.column_config.NumberColumn("Best GC rank", width="small"),
-        "Wins (rank 1)": st.column_config.NumberColumn("Wins (rank 1)", width="small"),
-        "Podiums (rank 1-3)": st.column_config.NumberColumn("Podiums (rank 1-3)", width="small"),
-    },
-)
-
-st.divider()
-
-# ----------------------------------------------------------------------
-# Rider nationality vs team nationality -- drill into a specific country
-# ----------------------------------------------------------------------
-st.subheader("🔎 Explore a country's riders and teams")
-countries = run_query("select country_code, country_name from country order by country_name")
-selected_country = st.selectbox("Country", countries["country_name"])
-code = countries.loc[countries["country_name"] == selected_country, "country_code"].iloc[0]
-
-detail_sql = """
-    select r.rider_name, r.bib, r.team, t.team_country_code
-    from rider r
-    join team t on t.team = r.team
-    where r.rider_country_code = %(code)s
-    order by r.rider_name
-"""
-detail_df = run_query(detail_sql, {"code": code})
-detail_df["racing_for_foreign_team"] = detail_df["team_country_code"] != code
-
-st.write(f"**{len(detail_df)} rider(s)** hold {selected_country} nationality.")
-st.dataframe(
-    detail_df.rename(
-        columns={
-            "rider_name": "Rider",
-            "bib": "Bib",
-            "team": "Team",
-            "team_country_code": "Team's country",
-            "racing_for_foreign_team": "Racing for a foreign team?",
-        }
-    ),
-    hide_index=True,
-    use_container_width=True,
-    column_config={
-        "Racing for a foreign team?": st.column_config.CheckboxColumn("Racing for a foreign team?"),
-    },
-)
+so_what([
+    f"<b>Federations:</b> {host['rider_country']}'s volume is not converting into GC results — investment should shift "
+    "from quantity of pros to developing a few riders capable of top-10 stage results on mountain and ITT days.",
+    f"<b>Sponsors & broadcasters:</b> {eff['rider_country']} and other high-conversion nations deliver outsized "
+    "on-screen presence per rider — strong markets for rider-level sponsorship and audience campaigns.",
+    f"<b>Teams:</b> {cross_share:.0%} of riders race for foreign-registered teams — scouting should be global; "
+    "nationality of the team is not a constraint on talent.",
+])

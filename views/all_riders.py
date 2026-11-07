@@ -6,13 +6,14 @@ Reached either via the sidebar navigation or by clicking a KPI card /
 so it works as a genuine drill-down target, not just a dump of rows.
 """
 
-import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
+import analytics as A
 from db import run_query
-from style import page_header, style_fig
+from style import STAGE_TYPE_COLORS, fmt_gap, kpi_row, page_header, short_team, style_fig
 
-page_header("🚴 All Riders", "Full roster of every registered rider, with search and status filters.")
+page_header("🚴 Rider Directory & Profile", "Reference: every registered rider (search & filter), and any rider's stage-by-stage trace.")
 
 riders_sql = """
     select
@@ -97,61 +98,45 @@ st.dataframe(
 st.divider()
 
 # ----------------------------------------------------------------------
-# Top-10 regulars: riders who most often finished in a stage's top 10,
-# with a drill-down into exactly which stages contributed.
+# Rider profile: return to the daily traces behind every summary
 # ----------------------------------------------------------------------
-st.subheader("🔥 Top-10 Regulars")
-st.caption("Riders who most often finished in a stage's top 10, across all 21 stages.")
+st.subheader("👤 Rider profile — the daily trace behind every summary")
+prof_name = st.selectbox(
+    "Rider", sorted(riders_df["rider_name"].tolist()),
+    index=sorted(riders_df["rider_name"].tolist()).index(A.gc_final().iloc[0]["rider_name"]),
+)
+pr = A.riders().set_index("rider_name").loc[prof_name]
+tr = A.results()
+tr = tr[tr["bib"] == pr["bib"]].merge(
+    A.gc_daily()[["stage_id", "bib", "gc_rank", "gap_to_leader"]], on=["stage_id", "bib"], how="left")
 
-regulars_sql = """
-    select r.bib, r.rider_name, r.team, count(*) as top10_count
-    from result res
-    join rider r on r.bib = res.bib
-    where res.rank <= 10
-    group by r.bib, r.rider_name, r.team
-    order by top10_count desc
-    limit 15
-"""
-regulars_df = run_query(regulars_sql)
+kpi_row([
+    ("Final GC", f"#{int(pr['gc_rank'])}" if pr["gc_rank"] == pr["gc_rank"] else f"Exit before S{int(pr['exit_stage'])}",
+     pr["status"]),
+    ("Team", short_team(pr["team"]), "designated leader" if pr["is_leader"] else ""),
+    ("Nation · age", f"{pr['rider_country'] or '—'} · {pr['age_at_start']:.0f}", "age at race start"),
+    ("Stage wins · top-10s", f"{int((tr['rank'] == 1).sum())} · {int((tr['rank'] <= 10).sum())}", f"{len(tr)} stages ridden"),
+    ("Best stage result", f"#{int(tr['rank'].min())}" if len(tr) else "—", ""),
+])
 
-rcol1, rcol2 = st.columns([1.2, 1], gap="medium")
-
-with rcol1:
-    reg_fig = px.bar(
-        regulars_df,
-        x="top10_count",
-        y="rider_name",
-        orientation="h",
-        color="top10_count",
-        color_continuous_scale="YlOrBr",
-        labels={"top10_count": "Stage top-10 finishes", "rider_name": "Rider"},
-        title="Most frequent stage top-10 finishers",
-    )
-    reg_fig.update_traces(
-        customdata=regulars_df[["team"]].values,
-        hovertemplate="<b>%{y}</b> (%{customdata[0]})<br>Top-10 finishes: %{x}<extra></extra>",
-    )
-    reg_fig.update_layout(height=480, yaxis=dict(autorange="reversed"), coloraxis_showscale=False)
-    reg_fig = style_fig(reg_fig)
-    st.plotly_chart(reg_fig, use_container_width=True)
-
-with rcol2:
-    st.markdown("**Drill into a rider's contributing stages**")
-    regular_pick = st.selectbox("Rider", regulars_df["rider_name"].tolist(), key="regulars_pick")
-    pick_bib = regulars_df.loc[regulars_df["rider_name"] == regular_pick, "bib"].iloc[0]
-    contributing_sql = """
-        select s.stage_id, s.day, s.type, res.rank
-        from result res
-        join stage s on s.day = res.day
-        where res.bib = %(bib)s and res.rank <= 10
-        order by s.stage_id
-    """
-    contributing_df = run_query(contributing_sql, {"bib": int(pick_bib)})
-    st.dataframe(
-        contributing_df.rename(
-            columns={"stage_id": "Stage", "day": "Date", "type": "Stage type", "rank": "Rank"}
-        ),
-        hide_index=True,
-        use_container_width=True,
-        height=400,
-    )
+if len(tr):
+    fig = go.Figure()
+    fig.add_bar(x=tr["stage_id"], y=tr["rank"], name="Stage rank",
+                marker_color=[STAGE_TYPE_COLORS[t] for t in tr["type_label"]],
+                customdata=tr[["type_label", "route", "gap_to_winner"]].values,
+                hovertemplate="Stage %{x} (%{customdata[0]})<br>%{customdata[1]}<br>Rank %{y} · "
+                "%{customdata[2]}s behind winner<extra></extra>")
+    fig.add_scatter(x=tr["stage_id"], y=tr["gc_rank"], name="GC rank after stage", mode="lines+markers",
+                    line=dict(color="#1A1A1A"), hovertemplate="Stage %{x}: GC #%{y}<extra></extra>")
+    fig.update_layout(height=380, yaxis=dict(autorange="reversed", title="Rank (1 = best)"),
+                      xaxis=dict(dtick=1, title="Stage (bar colour = terrain)"), legend=dict(orientation="h", y=1.1),
+                      title=f"{prof_name}: stage rank and GC rank, stage by stage")
+    st.plotly_chart(style_fig(fig, hovermode="x unified"), use_container_width=True)
+    with st.expander("Stage-by-stage table"):
+        st.dataframe(tr[["stage_id", "type_label", "route", "rank", "gap_to_winner", "bonus", "penalty", "gc_rank", "gap_to_leader"]]
+                     .assign(gap_to_winner=lambda d: d["gap_to_winner"].map(fmt_gap),
+                             gap_to_leader=lambda d: d["gap_to_leader"].map(fmt_gap))
+                     .rename(columns={"stage_id": "Stage", "type_label": "Type", "route": "Route", "rank": "Stage rank",
+                                      "gap_to_winner": "Gap to winner", "bonus": "Bonus s", "penalty": "Penalty s",
+                                      "gc_rank": "GC rank", "gap_to_leader": "Gap to GC leader"}),
+                     hide_index=True, use_container_width=True)

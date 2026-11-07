@@ -4,14 +4,17 @@ Tour de France Dashboard -- router / entry point.
 Run locally with:
     streamlit run app.py
 
-This file is the single entry point. It defines the grouped sidebar
-navigation (st.navigation with a dict of sections -> pages) and runs
-page-independent setup (page config, global CSS) exactly once, before
-routing to whichever view the user selected.
+The navigation follows a business-dashboard storyline rather than a
+list of tables:
 
-Pages live in views/ as plain Python modules (not the old pages/
-auto-routing folder), each one just a script that renders its content
-top-to-bottom -- st.navigation() executes the chosen one in place.
+    Executive Summary  ->  1 Race Outcome (how & where the race was won)
+                       ->  2 Performance Drivers (stages, riders, terrain)
+                       ->  3 Stakeholder Views (teams, nations)
+                       ->  Reference (directories, requirement map)
+
+Every analysis page follows the same pattern:
+    business question -> headline findings -> evidence (charts with
+    drill-down) -> "So what?" implications.
 """
 
 import streamlit as st
@@ -25,27 +28,26 @@ st.set_page_config(
 )
 apply_global_style()
 
-# ----------------------------------------------------------------------
-# Grouped navigation: a dict maps section labels -> list of st.Page.
-# This renders as a two-level sidebar (section header + its pages),
-# instead of one long flat list of every page.
-# ----------------------------------------------------------------------
 pages = {
-    "Overview": [
-        st.Page("views/home.py", title="Home", icon="🏠", default=True),
+    "Executive Summary": [
+        st.Page("views/home.py", title="Executive Summary", icon="🏠", default=True),
     ],
-    "Explore": [
-        st.Page("views/all_riders.py", title="All Riders", icon="🚴"),
-        st.Page("views/all_teams.py", title="All Teams", icon="🏢"),
+    "1 · Race Outcome": [
+        st.Page("views/race_story.py", title="Race Storyline", icon="📈"),
+        st.Page("views/stage_drilldown.py", title="Stage Analysis", icon="🗺️"),
     ],
-    "Race Analysis": [
-        st.Page("views/stage_drilldown.py", title="Stage Drill-Down", icon="🔍"),
-        st.Page("views/classification_comparison.py", title="Classification Comparison", icon="🏆"),
-        st.Page("views/aggregate_performance.py", title="Aggregate Performance", icon="📈"),
-        st.Page("views/terrain_pace.py", title="Terrain & Pace", icon="⛰️"),
+    "2 · Performance Drivers": [
+        st.Page("views/classification_comparison.py", title="Riders & Classifications", icon="🏆"),
+        st.Page("views/terrain_pace.py", title="Terrain & Rider Profiles", icon="⛰️"),
     ],
-    "Geography": [
-        st.Page("views/country_participation.py", title="Country Participation", icon="🌍"),
+    "3 · Stakeholder Views": [
+        st.Page("views/team_strategy.py", title="Team Strategy", icon="🏢"),
+        st.Page("views/country_participation.py", title="Nations", icon="🌍"),
+    ],
+    "Reference": [
+        st.Page("views/all_riders.py", title="Rider Directory & Profile", icon="🚴"),
+        st.Page("views/all_teams.py", title="Team Directory", icon="📋"),
+        st.Page("views/requirements_map.py", title="Requirement Map & Method", icon="🧭"),
     ],
 }
 
