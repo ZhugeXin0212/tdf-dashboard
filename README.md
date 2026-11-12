@@ -1,8 +1,15 @@
 # Tour de France Dashboard (BT5110 Task 3)
 
 A self-built, cloud-deployable OLAP dashboard for the 2023 Tour de
-France dataset, built with Streamlit + Plotly on top of the Postgres
-database created in `../Relational Schema/`.
+France dataset, built with Streamlit + Plotly.
+
+**Data backend (zero-config, permanent):** the full relational dataset
+ships with the repo as CSV files (`data-archive/table/`), queried
+directly with [DuckDB](https://duckdb.org) -- real SQL including joins
+and window functions, no server and no credentials, so the deployed
+app can never break due to an expired database. If a `DATABASE_URL`
+secret is configured, the app transparently switches to the original
+star-schema Postgres instance instead (see `db.py`).
 
 ## Structure (business-dashboard storyline)
 
